@@ -26,7 +26,7 @@ import vlc
 # Configuration defaults
 # ---------------------------------------------------------------------------
 IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808
-DEFAULT_VIDEO_FILE_PATH = "D:\\video.mp4"
+DEFAULT_VIDEO_FILE_PATH = "test.mp4"
 DEFAULT_MARGIN_SECONDS = 10.0
 DEFAULT_EJECT_WAIT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 5.0
@@ -53,7 +53,7 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> ControllerConfig:
     parser.add_argument(
         "--video",
         default=DEFAULT_VIDEO_FILE_PATH,
-        help="Path to the video file to play (defaults to D:\\video.mp4)",
+        help="Path to the video file to play (defaults to test.mp4)",
     )
     parser.add_argument(
         "--margin",
