@@ -16,9 +16,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
+      # The historic Makaizo gitlink has no .gitmodules entry. Fetch the exact
+      # public commit without initializing or traversing that unrelated link.
+      - name: Fetch the exact commit
+        shell: bash
+        run: |
+          git init --quiet
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
