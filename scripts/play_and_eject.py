@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from ctypes import wintypes
 import os
 import sys
 import time
@@ -203,6 +204,16 @@ def open_tray_ioctl(drive_letter: str) -> bool:
 
         path = f"\\\\.\\{dl}"
         kernel32 = ctypes.windll.kernel32
+        kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                        wintypes.HANDLE]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID,
+                                             wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+        kernel32.DeviceIoControl.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         GENERIC_READ = 0x80000000
         FILE_SHARE_READ = 0x00000001
         FILE_SHARE_WRITE = 0x00000002
@@ -218,22 +229,24 @@ def open_tray_ioctl(drive_letter: str) -> bool:
             None,
         )
         INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-        if handle == INVALID_HANDLE_VALUE:
+        if handle in (None, -1, INVALID_HANDLE_VALUE):
             print(f"CreateFile failed for {path}")
             return False
 
-        bytes_returned = ctypes.c_ulong()
-        result = kernel32.DeviceIoControl(
-            handle,
-            IOCTL_STORAGE_EJECT_MEDIA,
-            None,
-            0,
-            None,
-            0,
-            ctypes.byref(bytes_returned),
-            None,
-        )
-        kernel32.CloseHandle(handle)
+        bytes_returned = wintypes.DWORD()
+        try:
+            result = kernel32.DeviceIoControl(
+                handle,
+                IOCTL_STORAGE_EJECT_MEDIA,
+                None,
+                0,
+                None,
+                0,
+                ctypes.byref(bytes_returned),
+                None,
+            )
+        finally:
+            kernel32.CloseHandle(handle)
         if result:
             print("Sent eject command via IOCTL.")
             return True

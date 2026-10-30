@@ -56,6 +56,34 @@ class DriveSafetyTests(unittest.TestCase):
         with patch.object(self.controller.ctypes, "windll", windll, create=True):
             self.assertTrue(self.controller.open_tray_mci())
 
+    def test_ioctl_fallback_is_only_used_for_an_optical_video_drive(self):
+        get_type = Mock(side_effect=[3, 5])
+        windll = types.SimpleNamespace(kernel32=types.SimpleNamespace(GetDriveTypeW=get_type))
+        with patch.object(self.controller.ctypes, "windll", windll, create=True), \
+                patch.object(self.controller, "open_tray_mci", return_value=False), \
+                patch.object(self.controller, "open_tray_ioctl", return_value=True) as ioctl:
+            self.assertFalse(self.controller.open_tray(self.controller.infer_drive_letter(r"C:\test.mp4")))
+            ioctl.assert_not_called()
+            self.assertTrue(self.controller.open_tray(self.controller.infer_drive_letter(r"D:\video.mp4")))
+            ioctl.assert_called_once_with("D:")
+
+    def test_invalid_handle_does_not_issue_ioctl_or_close(self):
+        for invalid in (None, -1, self.controller.ctypes.c_void_p(-1).value):
+            with self.subTest(handle=invalid):
+                kernel32 = types.SimpleNamespace(CreateFileW=Mock(return_value=invalid),
+                    DeviceIoControl=Mock(), CloseHandle=Mock())
+                with patch.object(self.controller.ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), create=True):
+                    self.assertFalse(self.controller.open_tray_ioctl("D:"))
+                kernel32.DeviceIoControl.assert_not_called()
+                kernel32.CloseHandle.assert_not_called()
+
+    def test_open_handle_is_closed_when_ioctl_raises(self):
+        kernel32 = types.SimpleNamespace(CreateFileW=Mock(return_value=123),
+            DeviceIoControl=Mock(side_effect=OSError("device failure")), CloseHandle=Mock())
+        with patch.object(self.controller.ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), create=True):
+            self.assertFalse(self.controller.open_tray_ioctl("D:"))
+        kernel32.CloseHandle.assert_called_once_with(123)
+
 
 if __name__ == "__main__":
     unittest.main()
