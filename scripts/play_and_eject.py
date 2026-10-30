@@ -177,8 +177,13 @@ def open_tray_mci(alias: str = "cd") -> bool:
             print(f"MCI open reported error code: {rc}")
             return False
 
-        ctypes.windll.winmm.mciSendStringW(f"set {alias} door open", None, 0, None)
-        ctypes.windll.winmm.mciSendStringW(f"close {alias}", None, 0, None)
+        try:
+            rc = ctypes.windll.winmm.mciSendStringW(f"set {alias} door open", None, 0, None)
+        finally:
+            ctypes.windll.winmm.mciSendStringW(f"close {alias}", None, 0, None)
+        if rc != 0:
+            print(f"MCI eject reported error code: {rc}")
+            return False
         print("Sent eject command via MCI.")
         return True
     except Exception as exc:  # pragma: no cover - Windows-specific
@@ -254,10 +259,16 @@ def open_tray(drive_letter: Optional[str]) -> bool:
 
 
 def infer_drive_letter(video_path: str) -> Optional[str]:
-    """Infer the optical drive letter from the video path if possible."""
+    """Use the video's drive as an IOCTL fallback only if it is optical."""
 
-    if len(video_path) >= 2 and video_path[1] == ':':
-        return video_path[:2]
+    if (len(video_path) >= 2 and video_path[0].isascii()
+            and video_path[0].isalpha() and video_path[1] == ':'):
+        drive = video_path[:2].upper()
+        try:
+            if ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == 5:  # DRIVE_CDROM
+                return drive
+        except (AttributeError, OSError) as exc:
+            print(f"Could not identify drive type for {drive}: {exc}")
     return None
 
 
