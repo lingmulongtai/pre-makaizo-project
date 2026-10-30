@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from ctypes import wintypes
 import os
 import sys
 import time
@@ -26,7 +27,7 @@ import vlc
 # Configuration defaults
 # ---------------------------------------------------------------------------
 IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808
-DEFAULT_VIDEO_FILE_PATH = "D:\\video.mp4"
+DEFAULT_VIDEO_FILE_PATH = "test.mp4"
 DEFAULT_MARGIN_SECONDS = 10.0
 DEFAULT_EJECT_WAIT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 5.0
@@ -53,7 +54,7 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> ControllerConfig:
     parser.add_argument(
         "--video",
         default=DEFAULT_VIDEO_FILE_PATH,
-        help="Path to the video file to play (defaults to D:\\video.mp4)",
+        help="Path to the video file to play (defaults to test.mp4)",
     )
     parser.add_argument(
         "--margin",
@@ -177,8 +178,13 @@ def open_tray_mci(alias: str = "cd") -> bool:
             print(f"MCI open reported error code: {rc}")
             return False
 
-        ctypes.windll.winmm.mciSendStringW(f"set {alias} door open", None, 0, None)
-        ctypes.windll.winmm.mciSendStringW(f"close {alias}", None, 0, None)
+        try:
+            rc = ctypes.windll.winmm.mciSendStringW(f"set {alias} door open", None, 0, None)
+        finally:
+            ctypes.windll.winmm.mciSendStringW(f"close {alias}", None, 0, None)
+        if rc != 0:
+            print(f"MCI eject reported error code: {rc}")
+            return False
         print("Sent eject command via MCI.")
         return True
     except Exception as exc:  # pragma: no cover - Windows-specific
@@ -198,6 +204,16 @@ def open_tray_ioctl(drive_letter: str) -> bool:
 
         path = f"\\\\.\\{dl}"
         kernel32 = ctypes.windll.kernel32
+        kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                        wintypes.HANDLE]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID,
+                                             wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+        kernel32.DeviceIoControl.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         GENERIC_READ = 0x80000000
         FILE_SHARE_READ = 0x00000001
         FILE_SHARE_WRITE = 0x00000002
@@ -213,22 +229,24 @@ def open_tray_ioctl(drive_letter: str) -> bool:
             None,
         )
         INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-        if handle == INVALID_HANDLE_VALUE:
+        if handle in (None, -1, INVALID_HANDLE_VALUE):
             print(f"CreateFile failed for {path}")
             return False
 
-        bytes_returned = ctypes.c_ulong()
-        result = kernel32.DeviceIoControl(
-            handle,
-            IOCTL_STORAGE_EJECT_MEDIA,
-            None,
-            0,
-            None,
-            0,
-            ctypes.byref(bytes_returned),
-            None,
-        )
-        kernel32.CloseHandle(handle)
+        bytes_returned = wintypes.DWORD()
+        try:
+            result = kernel32.DeviceIoControl(
+                handle,
+                IOCTL_STORAGE_EJECT_MEDIA,
+                None,
+                0,
+                None,
+                0,
+                ctypes.byref(bytes_returned),
+                None,
+            )
+        finally:
+            kernel32.CloseHandle(handle)
         if result:
             print("Sent eject command via IOCTL.")
             return True
@@ -254,10 +272,16 @@ def open_tray(drive_letter: Optional[str]) -> bool:
 
 
 def infer_drive_letter(video_path: str) -> Optional[str]:
-    """Infer the optical drive letter from the video path if possible."""
+    """Use the video's drive as an IOCTL fallback only if it is optical."""
 
-    if len(video_path) >= 2 and video_path[1] == ':':
-        return video_path[:2]
+    if (len(video_path) >= 2 and video_path[0].isascii()
+            and video_path[0].isalpha() and video_path[1] == ':'):
+        drive = video_path[:2].upper()
+        try:
+            if ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == 5:  # DRIVE_CDROM
+                return drive
+        except (AttributeError, OSError) as exc:
+            print(f"Could not identify drive type for {drive}: {exc}")
     return None
 
 
